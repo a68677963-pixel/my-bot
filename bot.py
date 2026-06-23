@@ -183,6 +183,9 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
 
     if text == "🤖 AI учитель":
+        if data["stage"] == "testing":
+            await update.message.reply_text("⚠️ Сначала заверши вступительный тест! Ответь на текущий вопрос.")
+            return
         data["asking_ai"] = True
         data["vocab_mode"] = False
         data["phrase_mode"] = False
@@ -197,6 +200,9 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
 
     if text == "📖 Словарь":
+        if data["stage"] == "testing":
+            await update.message.reply_text("⚠️ Сначала заверши вступительный тест! Ответь на текущий вопрос.")
+            return
         data["vocab_mode"] = True
         data["asking_ai"] = False
         data["phrase_mode"] = False
@@ -212,6 +218,9 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
 
     if text == "💬 Разговорные фразы":
+        if data["stage"] == "testing":
+            await update.message.reply_text("⚠️ Сначала заверши вступительный тест! Ответь на текущий вопрос.")
+            return
         data["phrase_mode"] = True
         data["asking_ai"] = False
         data["vocab_mode"] = False
@@ -227,6 +236,9 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
 
     if text == "📚 Уроки":
+        if data["stage"] == "testing":
+            await update.message.reply_text("⚠️ Сначала заверши вступительный тест! Ответь на текущий вопрос.")
+            return
         data["asking_ai"] = False
         data["vocab_mode"] = False
         data["phrase_mode"] = False
