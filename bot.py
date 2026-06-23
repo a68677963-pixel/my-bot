@@ -107,13 +107,15 @@ async def ask_ai(prompt: str) -> str:
     async with httpx.AsyncClient() as client:
         r = await client.post(url, json=payload, headers=headers, timeout=30)
         return r.json()["choices"][0]["message"]["content"]
-
-
-async def determine_level(answers: list) -> str:
-    prompt = f"""Пользователь прошёл тест. Его ответы:
-{chr(10).join([f"Вопрос: {PLACEMENT_TEST[i]['question']}\nОтвет: {answers[i]}" for i in range(len(answers))])}
-Определи уровень: A1, A2, B1 или B2. Ответь ТОЛЬКО одним вариантом."""
-    result = await ask_ai(prompt)
+        async def determine_level(answers: list) -> str:
+            formatted_answers = []
+        for i in range(len(answers)):
+            q_text = PLACEMENT_TEST[i]['question']
+            a_text = answers[i]
+            formatted_answers.append(f"Вопрос: {q_text} | Ответ: {a_text}")
+        answers_string = "\n".join(formatted_answers
+        prompt = f"Пользователь прошёл тест. Его ответы:\n{answers_string}\nОпредели уровень: A1, A2, B1 или B2. Ответь ТОЛЬКО одним вариантом."
+        result = await ask_ai(prompt)
     for level in ["B2", "B1", "A2", "A1"]:
         if level in result:
             return level
