@@ -113,10 +113,18 @@ def main_menu():
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.effective_user.id
     user_data[user_id] = {
-        "stage": "testing", "test_q": 0, "answers": [],
-        "level": None, "lesson": 0, "score": 0,
-        "asking_ai": False, "vocab_mode": False, "phrase_mode": False,
-        "waiting_answer": False, "vocab_word": None
+        "stage": "testing",
+        "test_q": 0,
+        "answers": [],
+        "level": None,
+        "lesson": 0,
+        "score": 0,
+        "asking_ai": False,
+        "vocab_mode": False,
+        "phrase_mode": False,
+        "waiting_answer": False,
+        "vocab_word": None,
+        "processing": False,
     }
     await update.message.reply_text(
         "🇬🇧 *English AI Tutor*\n"
@@ -207,16 +215,19 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await send_lesson(update, data)
         return
 
-    # 2. ВХОДНОЙ ТЕСТ — ИСПРАВЛЕННАЯ ЛОГИКА
+    # 2. ВХОДНОЙ ТЕСТ — защита от двойных сообщений
     if data["stage"] == "testing":
-        # Сохраняем ответ на текущий вопрос
+        # Если уже обрабатываем ответ — игнорируем лишнее сообщение
+        if data.get("processing"):
+            return
+
+        data["processing"] = True
         data["answers"].append(text)
-        # Переходим к следующему вопросу
         data["test_q"] += 1
 
         if data["test_q"] < len(PLACEMENT_TEST):
-            # Показываем следующий вопрос сразу
             next_q = PLACEMENT_TEST[data["test_q"]]
+            data["processing"] = False
             await update.message.reply_text(
                 f"✅ Ответ принят!\n\n"
                 f"❓ *Вопрос {data['test_q'] + 1}/{len(PLACEMENT_TEST)}:*\n"
@@ -224,13 +235,13 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 parse_mode="Markdown"
             )
         else:
-            # Все вопросы отвечены — определяем уровень
             await update.message.reply_text("⏳ *Анализирую твои ответы...*", parse_mode="Markdown")
             await update.message.chat.send_action("typing")
             level = await determine_level(data["answers"])
             data["level"] = level
             data["stage"] = "lessons"
             data["lesson"] = 0
+            data["processing"] = False
 
             level_emoji = {"A1": "🌱", "A2": "📈", "B1": "💪", "B2": "🔥"}
             level_desc = {
@@ -252,6 +263,11 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     # 3. ПРОВЕРКА ОТВЕТА НА ТЕСТ ВНУТРИ УРОКА
     if data["stage"] == "lessons" and data.get("waiting_answer"):
+        # Защита от двойных сообщений в уроках
+        if data.get("processing"):
+            return
+
+        data["processing"] = True
         lessons = LESSONS.get(data["level"], LESSONS["A1"])
         lesson_idx = data["lesson"]
 
@@ -265,6 +281,7 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
             data["lesson"] += 1
             data["waiting_answer"] = False
+            data["processing"] = False
 
             if data["lesson"] < len(lessons):
                 await update.message.reply_text(msg + "▶️ *Следующий урок:*", parse_mode="Markdown")
@@ -274,6 +291,8 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
                     msg + f"🏆 *Уровень {data['level']} пройден!*\n\nВыбери что делать дальше в меню.",
                     parse_mode="Markdown", reply_markup=main_menu()
                 )
+        else:
+            data["processing"] = False
         return
 
     # 4. РЕЖИМ AI УЧИТЕЛЯ
