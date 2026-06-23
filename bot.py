@@ -2,8 +2,6 @@ import os
 import logging
 import httpx
 import random
-import threading
-from http.server import BaseHTTPRequestHandler, HTTPServer
 from telegram import Update, ReplyKeyboardMarkup, KeyboardButton
 from telegram.ext import ApplicationBuilder, CommandHandler, MessageHandler, ContextTypes, filters
 
@@ -65,7 +63,7 @@ PHRASES = [
     {"phrase": "Break a leg!", "meaning": "Удачи! (буквально: сломай ногу)", "context": "Говорят перед выступлением"},
     {"phrase": "It's raining cats and dogs", "meaning": "Льёт как из ведра", "context": "О сильном дожде"},
     {"phrase": "Hit the nail on the head", "meaning": "Попасть в точку", "context": "Когда кто-то точно описал ситуацию"},
-    {"phrase": "Under the weather", "meaning": "Чувствовать себя плохо", "context": "Когда болеешь"},
+    {"phrase": "Under the weather", "meaning": "Чувствовать себя плохо", "context": "Когда болешь"},
     {"phrase": "Bite the bullet", "meaning": "Стиснуть зубы и сделать", "context": "Делать что-то неприятное"},
     {"phrase": "Cost an arm and a leg", "meaning": "Стоить очень дорого", "context": "О дорогих вещах"},
     {"phrase": "Once in a blue moon", "meaning": "Крайне редко", "context": "О редких событиях"},
@@ -79,9 +77,6 @@ user_data = {}
 
 async def ask_ai(prompt: str) -> str:
     url = "https://api.groq.com/openai/v1/chat/completions"
-    if 'GROQ_API_KEY' not in os.environ:
-        return "⚠️ Ошибка: GROQ_API_KEY не установлен на сервере Render."
-    
     headers = {"Authorization": f"Bearer {os.environ['GROQ_API_KEY']}", "Content-Type": "application/json"}
     payload = {
         "model": "llama-3.3-70b-versatile",
@@ -91,13 +86,9 @@ async def ask_ai(prompt: str) -> str:
         ],
         "max_tokens": 400
     }
-    try:
-        async with httpx.AsyncClient() as client:
-            r = await client.post(url, json=payload, headers=headers, timeout=30)
-            return r.json()["choices"][0]["message"]["content"]
-    except Exception as e:
-        logger.error(f"Groq error: {e}")
-        return "Извини, нейросеть сейчас перезагружается. Попробуй ещё раз через минуту."
+    async with httpx.AsyncClient() as client:
+        r = await client.post(url, json=payload, headers=headers, timeout=30)
+        return r.json()["choices"][0]["message"]["content"]
 
 
 async def determine_level(answers: list) -> str:
@@ -148,62 +139,7 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     data = user_data[user_id]
 
-   # ————————————————————————————————————————————————————————————
-    # БЛОК ВХОДНОГО ТЕСТА (ЗАЩИЩЕН ОТ ПОВТОРНЫХ НАЖАТИЙ)
-    # ————————————————————————————————————————————————————————————
-    if data["stage"] == "testing":
-        if text in ["📚 Уроки", "📖 Словарь", "💬 Разговорные фразы", "🤖 AI учитель", "📊 Прогресс"]:
-            await update.message.reply_text("⚠️ Сначала заверши вступительный тест! Ответь на текущий вопрос.")
-            return
-
-        # ЗАЩИТА: Если бот уже обрабатывает один ответ, второе сообщение просто игнорируем
-        if data.get("is_processing_test"):
-            return
-        
-        data["is_processing_test"] = True  # Ставим блок
-
-        try:
-            data["answers"].append(text)
-            data["test_q"] += 1
-            
-            if data["test_q"] < len(PLACEMENT_TEST):
-                q = PLACEMENT_TEST[data["test_q"]]
-                # Теперь бот пришлет строго следующий по порядку вопрос!
-                await update.message.reply_text(
-                    f"✅ Ответ принят!\n\n❓ *Вопрос {data['test_q']+1}/{len(PLACEMENT_TEST)}:*\n_{q['question']}_",
-                    parse_mode="Markdown"
-                )
-            else:
-                await update.message.reply_text("⏳ *Анализирую твои ответы...*", parse_mode="Markdown")
-                await update.message.chat.send_action("typing")
-                level = await determine_level(data["answers"])
-                data["level"] = level
-                data["stage"] = "lessons"
-                data["lesson"] = 0
-
-                level_emoji = {"A1": "🌱", "A2": "📈", "B1": "💪", "B2": "🔥"}
-                level_desc = {
-                    "A1": "Начинающий — начнём с самого начала!", 
-                    "A2": "Элементарный — хороший старт!", 
-                    "B1": "Средний — отличный уровень!", 
-                    "B2": "Выше среднего — ты молодец!"
-                }
-
-                await update.message.reply_text(
-                    f"🎯 *РЕЗУЛЬТАТ ТЕСТА*\n━━━━━━━━━━━━━━━━\n\n"
-                    f"{level_emoji[level]} Твой уровень: *{level}*\n"
-                    f"📝 {level_desc[level]}\n\n"
-                    f"🚀 Начинаем уроки!",
-                    parse_mode="Markdown", reply_markup=main_menu()
-                )
-                await send_lesson(update, data)
-        finally:
-            data["is_processing_test"] = False  # Снимаем блок в любом случае
-        return
-
-    # ————————————————————————————————————————————————————————————
-    # БЛОК ОБРАБОТКИ КНОПОК МЕНЮ
-    # ————————————————————————————————————————————————————————————
+    # 1. КНОПКИ ГЛАВНОГО МЕНЮ
     if text == "🔄 Новый тест":
         await start(update, context)
         return
@@ -224,9 +160,12 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         data["asking_ai"] = True
         data["vocab_mode"] = False
         data["phrase_mode"] = False
-        data["waiting_answer"] = False
         await update.message.reply_text(
-            "🤖 *AI Учитель готов помочь!*\n\nЗадай любой вопрос по английскому:\n• Объясни Present Perfect\n• Как использовать артикли?",
+            "🤖 *AI Учитель готов помочь!*\n\n"
+            "Задай любой вопрос по английскому:\n"
+            "• Объясни Present Perfect\n"
+            "• Как использовать артикли?\n"
+            "• В чём разница между make и do?",
             parse_mode="Markdown"
         )
         return
@@ -235,11 +174,13 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         data["vocab_mode"] = True
         data["asking_ai"] = False
         data["phrase_mode"] = False
-        data["waiting_answer"] = False
         word = random.choice(VOCABULARY)
         data["vocab_word"] = word
         await update.message.reply_text(
-            f"📖 *СЛОВАРНЫЙ ТРЕНАЖЁР*\n━━━━━━━━━━━━━━━━\n\n🔤 Слово: *{word['word']}*\n\n📝 Пример: _{word['example']}_\n\n❓ Переведи это слово на русский:",
+            f"📖 *СЛОВАРНЫЙ ТРЕНАЖЁР*\n━━━━━━━━━━━━━━━━\n\n"
+            f"🔤 Слово: *{word['word']}*\n\n"
+            f"📝 Пример: _{word['example']}_\n\n"
+            f"❓ Переведи это слово на русский:",
             parse_mode="Markdown"
         )
         return
@@ -248,10 +189,13 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         data["phrase_mode"] = True
         data["asking_ai"] = False
         data["vocab_mode"] = False
-        data["waiting_answer"] = False
         phrase = random.choice(PHRASES)
         await update.message.reply_text(
-            f"💬 *РАЗГОВОРНАЯ ФРАЗА*\n━━━━━━━━━━━━━━━━\n\n🗣 *{phrase['phrase']}*\n\n📌 Значение: {phrase['meaning']}\n\n💡 Контекст: _{phrase['context']}_\n\nНапиши *'ещё'* для новой фразы!",
+            f"💬 *РАЗГОВОРНАЯ ФРАЗА*\n━━━━━━━━━━━━━━━━\n\n"
+            f"🗣 *{phrase['phrase']}*\n\n"
+            f"📌 Значение: {phrase['meaning']}\n\n"
+            f"💡 Контекст: _{phrase['context']}_\n\n"
+            f"Напиши *'ещё'* для новой фразы или задай вопрос!",
             parse_mode="Markdown", reply_markup=main_menu()
         )
         return
@@ -263,13 +207,54 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await send_lesson(update, data)
         return
 
-    # ————————————————————————————————————————————————————————————
-    # БЛОК ОТВЕТОВ НА РЕЖИМЫ ОБУЧЕНИЯ
-    # ————————————————————————————————————————————————————————————
+    # 2. ВХОДНОЙ ТЕСТ — ИСПРАВЛЕННАЯ ЛОГИКА
+    if data["stage"] == "testing":
+        # Сохраняем ответ на текущий вопрос
+        data["answers"].append(text)
+        # Переходим к следующему вопросу
+        data["test_q"] += 1
+
+        if data["test_q"] < len(PLACEMENT_TEST):
+            # Показываем следующий вопрос сразу
+            next_q = PLACEMENT_TEST[data["test_q"]]
+            await update.message.reply_text(
+                f"✅ Ответ принят!\n\n"
+                f"❓ *Вопрос {data['test_q'] + 1}/{len(PLACEMENT_TEST)}:*\n"
+                f"_{next_q['question']}_",
+                parse_mode="Markdown"
+            )
+        else:
+            # Все вопросы отвечены — определяем уровень
+            await update.message.reply_text("⏳ *Анализирую твои ответы...*", parse_mode="Markdown")
+            await update.message.chat.send_action("typing")
+            level = await determine_level(data["answers"])
+            data["level"] = level
+            data["stage"] = "lessons"
+            data["lesson"] = 0
+
+            level_emoji = {"A1": "🌱", "A2": "📈", "B1": "💪", "B2": "🔥"}
+            level_desc = {
+                "A1": "Начинающий — начнём с самого начала!",
+                "A2": "Элементарный — хороший старт!",
+                "B1": "Средний — отличный уровень!",
+                "B2": "Выше среднего — ты молодец!"
+            }
+
+            await update.message.reply_text(
+                f"🎯 *РЕЗУЛЬТАТ ТЕСТА*\n━━━━━━━━━━━━━━━━\n\n"
+                f"{level_emoji[level]} Твой уровень: *{level}*\n"
+                f"📝 {level_desc[level]}\n\n"
+                f"🚀 Начинаем уроки!",
+                parse_mode="Markdown", reply_markup=main_menu()
+            )
+            await send_lesson(update, data)
+        return
+
+    # 3. ПРОВЕРКА ОТВЕТА НА ТЕСТ ВНУТРИ УРОКА
     if data["stage"] == "lessons" and data.get("waiting_answer"):
         lessons = LESSONS.get(data["level"], LESSONS["A1"])
         lesson_idx = data["lesson"]
-        
+
         if lesson_idx < len(lessons):
             correct = lessons[lesson_idx]["answer"]
             if text.lower().strip() == correct.lower():
@@ -277,10 +262,10 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 msg = "✅ *Правильно! Молодец!* 🎉\n\n"
             else:
                 msg = f"❌ *Неправильно*\nПравильный ответ: *{correct}*\n\n"
-            
+
             data["lesson"] += 1
             data["waiting_answer"] = False
-            
+
             if data["lesson"] < len(lessons):
                 await update.message.reply_text(msg + "▶️ *Следующий урок:*", parse_mode="Markdown")
                 await send_lesson(update, data)
@@ -291,6 +276,7 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 )
         return
 
+    # 4. РЕЖИМ AI УЧИТЕЛЯ
     if data.get("asking_ai"):
         await update.message.chat.send_action("typing")
         reply = await ask_ai(text)
@@ -298,6 +284,7 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         data["asking_ai"] = False
         return
 
+    # 5. РЕЖИМ СЛОВАРНОГО ТРЕНАЖЁРА
     if data.get("vocab_mode"):
         word = data.get("vocab_word")
         if word and text.lower().strip() == word["translate"].lower():
@@ -307,16 +294,25 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         new_word = random.choice(VOCABULARY)
         data["vocab_word"] = new_word
         await update.message.reply_text(
-            response + f"📖 *Следующее слово:*\n\n🔤 *{new_word['word']}*\n📝 _{new_word['example']}_\n\n❓ Переведи:",
+            response +
+            f"📖 *Следующее слово:*\n\n"
+            f"🔤 *{new_word['word']}*\n"
+            f"📝 _{new_word['example']}_\n\n"
+            f"❓ Переведи:",
             parse_mode="Markdown"
         )
         return
 
+    # 6. РЕЖИМ РАЗГОВОРНЫХ ФРАЗ
     if data.get("phrase_mode"):
         if text.lower() == "ещё":
             phrase = random.choice(PHRASES)
             await update.message.reply_text(
-                f"💬 *РАЗГОВОРНАЯ ФРАЗА*\n━━━━━━━━━━━━━━━━\n\n🗣 *{phrase['phrase']}*\n\n📌 Значение: {phrase['meaning']}\n\n💡 Контекст: _{phrase['context']}_\n\nНапиши *'ещё'* для новой фразы!",
+                f"💬 *РАЗГОВОРНАЯ ФРАЗА*\n━━━━━━━━━━━━━━━━\n\n"
+                f"🗣 *{phrase['phrase']}*\n\n"
+                f"📌 Значение: {phrase['meaning']}\n\n"
+                f"💡 Контекст: _{phrase['context']}_\n\n"
+                f"Напиши *'ещё'* для новой фразы!",
                 parse_mode="Markdown", reply_markup=main_menu()
             )
         else:
@@ -325,44 +321,44 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
             await update.message.reply_text(f"🤖 {reply}", reply_markup=main_menu())
         return
 
-    # Свободный ответ AI на любой другой текст
+    # 7. ПО УМОЛЧАНИЮ — свободный запрос к AI
     await update.message.chat.send_action("typing")
     reply = await ask_ai(text)
     await update.message.reply_text(f"🤖 {reply}", reply_markup=main_menu())
-    
 
-# Крошечный сервер для обмана Render
-class HealthCheckHandler(BaseHTTPRequestHandler):
-    def do_GET(self):
-        self.send_response(200)
-        self.send_header("Content-type", "text/plain")
-        self.end_headers()
-        self.wfile.write(b"Bot is running!")
 
-    def log_message(self, format, *args):
-        return # Отключаем лишний спам в консоль
+async def send_lesson(update: Update, data: dict):
+    level = data.get("level", "A1")
+    lessons = LESSONS.get(level, LESSONS["A1"])
+    idx = data["lesson"]
+    if idx >= len(lessons):
+        await update.message.reply_text(
+            "🏆 *Все уроки пройдены!*\n\nИспользуй словарь и фразы для практики!",
+            parse_mode="Markdown", reply_markup=main_menu()
+        )
+        return
+    lesson = lessons[idx]
+    total = len(lessons)
+    await update.message.reply_text(
+        f"📚 Урок {idx + 1}/{total} • Уровень {level}\n"
+        f"{lesson['text']}\n\n"
+        f"❓ *Тест:* {lesson['test']}\n\n"
+        f"✏️ Напиши свой ответ:",
+        parse_mode="Markdown"
+    )
+    data["waiting_answer"] = True
 
-def run_health_check():
-    # Render передает порт в переменных окружения PORT, по умолчанию ставим 10000
-    port = int(os.environ.get("PORT", 10000))
-    server = HTTPServer(("0.0.0.0", port), HealthCheckHandler)
-    server.serve_forever()
 
 def main():
     token = os.environ.get("TELEGRAM_BOT_TOKEN")
     if not token:
-        raise ValueError("No TELEGRAM_BOT_TOKEN provided")
-        
-    # Запускаем веб-сервер в отдельном потоке, чтобы он не мешал боту
-    threading.Thread(target=run_health_check, daemon=True).start()
-
+        raise ValueError("TELEGRAM_BOT_TOKEN не задан!")
     app = ApplicationBuilder().token(token).build()
-    
     app.add_handler(CommandHandler("start", start))
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
-    
     logger.info("English бот запущен...")
     app.run_polling()
+
 
 if __name__ == "__main__":
     main()
