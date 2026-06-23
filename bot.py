@@ -148,20 +148,19 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     data = user_data[user_id]
 
-    # ————————————————————————————————————————————————————————————
-    # БЛОК ВХОДНОГО ТЕСТА (ЗАЩИЩЕН ОТ ПОВТОРНЫХ НАЖАТИЙ КНОПОК)
+   # ————————————————————————————————————————————————————————————
+    # БЛОК ВХОДНОГО ТЕСТА (ЗАЩИЩЕН ОТ ПОВТОРНЫХ НАЖАТИЙ)
     # ————————————————————————————————————————————————————————————
     if data["stage"] == "testing":
-        # Если юзер жмёт кнопки главного меню во время теста — игнорируем
         if text in ["📚 Уроки", "📖 Словарь", "💬 Разговорные фразы", "🤖 AI учитель", "📊 Прогресс"]:
             await update.message.reply_text("⚠️ Сначала заверши вступительный тест! Ответь на текущий вопрос.")
             return
 
-        # Защита от быстрого спама ответами
+        # ЗАЩИТА: Если бот уже обрабатывает один ответ, второе сообщение просто игнорируем
         if data.get("is_processing_test"):
-            return  # Просто игнорируем второе быстрое сообщение, пока обрабатывается первое
+            return
         
-        data["is_processing_test"] = True  # Ставим блокировку
+        data["is_processing_test"] = True  # Ставим блок
 
         try:
             data["answers"].append(text)
@@ -169,6 +168,7 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
             
             if data["test_q"] < len(PLACEMENT_TEST):
                 q = PLACEMENT_TEST[data["test_q"]]
+                # Теперь бот пришлет строго следующий по порядку вопрос!
                 await update.message.reply_text(
                     f"✅ Ответ принят!\n\n❓ *Вопрос {data['test_q']+1}/{len(PLACEMENT_TEST)}:*\n_{q['question']}_",
                     parse_mode="Markdown"
@@ -198,7 +198,7 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 )
                 await send_lesson(update, data)
         finally:
-            data["is_processing_test"] = False  # Снимаем блокировку при любом исходе
+            data["is_processing_test"] = False  # Снимаем блок в любом случае
         return
 
     # ————————————————————————————————————————————————————————————
