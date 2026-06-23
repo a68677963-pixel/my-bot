@@ -256,13 +256,14 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
         if data["test_q"] < len(PLACEMENT_TEST):
             next_q = PLACEMENT_TEST[data["test_q"]]
-            data["processing"] = False
             await update.message.reply_text(
                 f"✅ Ответ принят!\n\n"
                 f"❓ *Вопрос {data['test_q'] + 1}/{len(PLACEMENT_TEST)}:*\n"
                 f"_{next_q['question']}_",
                 parse_mode="Markdown"
             )
+            data["is_processing_test"] = False
+            return
         else:
             await update.message.reply_text("⏳ *Анализирую твои ответы...*", parse_mode="Markdown")
             await update.message.chat.send_action("typing")
