@@ -2,11 +2,29 @@ import os
 import logging
 import httpx
 import random
+import threading
+from http.server import BaseHTTPRequestHandler, HTTPServer
 from telegram import Update, ReplyKeyboardMarkup, KeyboardButton
 from telegram.ext import ApplicationBuilder, CommandHandler, MessageHandler, ContextTypes, filters
 
 logging.basicConfig(format="%(asctime)s - %(name)s - %(levelname)s - %(message)s", level=logging.INFO)
 logger = logging.getLogger(__name__)
+
+# Крошечный сервер для обмана Render
+class HealthCheckHandler(BaseHTTPRequestHandler):
+    def do_GET(self):
+        self.send_response(200)
+        self.send_header("Content-type", "text/plain")
+        self.end_headers()
+        self.wfile.write(b"Bot is running!")
+
+    def log_message(self, format, *args):
+        return  # Отключаем лишний спам в консоль
+
+def run_health_check():
+    port = int(os.environ.get("PORT", 10000))
+    server = HTTPServer(("0.0.0.0", port), HealthCheckHandler)
+    server.serve_forever()
 
 PLACEMENT_TEST = [
     {"question": "Переведи: 'Hello, my name is John'"},
@@ -217,7 +235,6 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     # 2. ВХОДНОЙ ТЕСТ — защита от двойных сообщений
     if data["stage"] == "testing":
-        # Если уже обрабатываем ответ — игнорируем лишнее сообщение
         if data.get("processing"):
             return
 
@@ -263,7 +280,6 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     # 3. ПРОВЕРКА ОТВЕТА НА ТЕСТ ВНУТРИ УРОКА
     if data["stage"] == "lessons" and data.get("waiting_answer"):
-        # Защита от двойных сообщений в уроках
         if data.get("processing"):
             return
 
@@ -372,6 +388,10 @@ def main():
     token = os.environ.get("TELEGRAM_BOT_TOKEN")
     if not token:
         raise ValueError("TELEGRAM_BOT_TOKEN не задан!")
+        
+    # Запуск фонового веб-сервера для Render
+    threading.Thread(target=run_health_check, daemon=True).start()
+
     app = ApplicationBuilder().token(token).build()
     app.add_handler(CommandHandler("start", start))
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
